@@ -5,7 +5,8 @@ directories_to_check = [
     ["calculator", "."],
     ["calculator", "pkg"],
     ["calculator", "/bin"],
-    ["calculator","../"]
+    ["calculator","../"],
+    ["calculator","./functions"]
 ]
 
 for dir in directories_to_check:
