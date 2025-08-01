@@ -45,29 +45,42 @@ def main():
         - Write or overwrite files
 
         All paths you provide should be relative to the working directory. You do not need to specify the working directory in your function calls as it is automatically injected for security reasons.
+        Start by getting a list of all files and directories so you have the proper context to answer questions.
         """
 
     messages = [types.Content(role="user", parts=[types.Part(text=prompt)])]
 
     api_key = os.environ.get("GEMINI_API_KEY")
     client = genai.Client(api_key=api_key)
-    ai_response = client.models.generate_content(
-        model="gemini-2.0-flash-001",
-        contents=messages,
-        config=types.GenerateContentConfig(
-            tools=[available_functions], system_instruction=system_prompt
-        ),
-    )
 
-    if len(ai_response.function_calls) > 0:
-        for func in ai_response.function_calls:
-            func_results = call_function(func, verbose)
-            if not func_results.parts[0].function_response.response:
-                raise Exception(f"Error with response from {func.name}")
-            if verbose:
-                print(f"-> {func_results.parts[0].function_response.response}")
-    else:
-        print(f"Text returned is {ai_response.text}")
+    for i in range(20):
+        try:
+            ai_response = client.models.generate_content(
+                model="gemini-2.0-flash-001",
+                contents=messages,
+                config=types.GenerateContentConfig(
+                    tools=[available_functions], system_instruction=system_prompt
+                ),
+            )
+
+            for response in ai_response.candidates:
+                messages.append(response.content)
+
+            if ai_response.function_calls:
+                for func in ai_response.function_calls:
+                    func_results = call_function(func, verbose)
+                    if not func_results.parts[0].function_response.response:
+                        raise Exception(f"Error with response from {func.name}")
+                    if verbose:
+                        print(f"-> {func_results.parts[0].function_response.response}")
+                    messages.append(func_results)
+            else:
+                print ("Final Response:\n")
+                print (ai_response.text)
+                break
+        except Exception as e:
+            return (f"There was an error processing the request: {e}")
+
     if verbose:
         print(f"User prompt: {prompt}\n")
         print(f"Prompt tokens: {ai_response.usage_metadata.prompt_token_count}")
