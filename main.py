@@ -3,6 +3,19 @@ import sys
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+from functions.get_files_info import schema_get_files_info, get_files_info
+from functions.get_file_content import schema_get_file_content, get_file_content
+from functions.run_python import schema_run_python, run_python_file
+from functions.write_file import schema_write_file, write_file
+
+available_functions = types.Tool(
+    function_declarations=[
+        schema_get_files_info,
+        schema_get_file_content,
+        schema_run_python,
+        schema_write_file,
+    ]
+)
 
 
 def main():
@@ -21,6 +34,18 @@ def main():
         sys.exit(1)
 
     prompt = " ".join(args)
+    system_prompt = """
+        You are a helpful AI coding agent.
+
+        When a user asks a question or makes a request, make a function call plan. You can perform the following operations:
+
+        - List files and directories
+        - Read file contents
+        - Execute Python files with optional arguments
+        - Write or overwrite files
+
+        All paths you provide should be relative to the working directory. You do not need to specify the working directory in your function calls as it is automatically injected for security reasons.
+        """
 
     messages = [types.Content(role="user", parts=[types.Part(text=prompt)])]
 
@@ -29,13 +54,63 @@ def main():
     ai_response = client.models.generate_content(
         model="gemini-2.0-flash-001",
         contents=messages,
+        config=types.GenerateContentConfig(
+            tools=[available_functions], system_instruction=system_prompt
+        ),
     )
 
-    print(f"Text returned is {ai_response.text}")
+    if len(ai_response.function_calls) > 0:
+        for func in ai_response.function_calls:
+            func_results = call_function(func, verbose)
+            if not func_results.parts[0].function_response.response:
+                raise Exception(f"Error with response from {func.name}")
+            if verbose:
+                print(f"-> {func_results.parts[0].function_response.response}")
+    else:
+        print(f"Text returned is {ai_response.text}")
     if verbose:
         print(f"User prompt: {prompt}\n")
         print(f"Prompt tokens: {ai_response.usage_metadata.prompt_token_count}")
         print(f"Response tokens: {ai_response.usage_metadata.candidates_token_count}")
+
+
+def call_function(function_call_part, verbose=False):
+    available_functions = {
+        "get_files_info": get_files_info,
+        "get_file_content": get_file_content,
+        "run_python_file": run_python_file,
+        "write_file": write_file,
+    }
+    if function_call_part.name not in available_functions.keys():
+        return types.Content(
+            role="tool",
+            parts=[
+                types.Part.from_function_response(
+                    name=function_call_part.name,
+                    response={"error": f"Unknown function: {function_call_part.name}"},
+                )
+            ],
+        )
+
+    if verbose:
+        print(f"Calling function: {function_call_part.name}({function_call_part.args})")
+    else:
+        print(f" - Calling function: {function_call_part.name}")
+
+    func_to_call = available_functions[function_call_part.name]
+    func_args = function_call_part.args
+    func_args["working_directory"] = "./calculator"
+
+    func_results = func_to_call(**func_args)
+    return types.Content(
+        role="tool",
+        parts=[
+            types.Part.from_function_response(
+                name=function_call_part.name,
+                response={"result": func_results},
+            )
+        ],
+    )
 
 
 if __name__ == "__main__":
